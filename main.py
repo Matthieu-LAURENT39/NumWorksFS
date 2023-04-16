@@ -70,7 +70,7 @@ class NumworksFS(Operations, LoggingMixIn):
     def readdir(self, path, fh):
         logger.debug(f"Reading dir {path}")
         p = Path(path)
-        if p.absolute() != Path("/"):
+        if p.absolute() != Path(self.root):
             raise FuseOSError(EIO)
 
         files = self._get_files()
@@ -87,13 +87,13 @@ class NumworksFS(Operations, LoggingMixIn):
     def getattr(self, path, fh=None):
         logger.debug(f"Getting attr for {path}")
 
-        if path == "/":
+        if path == self.root:
             size = 0
         else:
             file = self._get_file(Path(path).name)
             size = len(file.content.encode("utf-8"))
 
-        mode_base = S_IFDIR if path == "/" else S_IFREG
+        mode_base = S_IFDIR if path == self.root else S_IFREG
 
         return dict(
             st_mode=(mode_base | 0o555),
