@@ -1,0 +1,4 @@
+fusepy
+upsilon-py
+# Upsilon forgot to add it as a dependency
+rich
