@@ -1,16 +1,15 @@
 import asyncio
 import logging
 import os
-import sys
 from errno import EIO, ENOENT
 from io import BytesIO
 from pathlib import Path
 from stat import S_IFDIR, S_IFREG
 
 import upsilon_py
-from fuse import FUSE, FuseOSError, LoggingMixIn, Operations
+from fuse import FuseOSError, LoggingMixIn, Operations
 
-from storage_handler import NumworkFile, NumworksStorage
+from NumworksFS.storage_handler import NumworkFile, NumworksStorage
 
 logger = logging.getLogger(__name__)
 
@@ -177,22 +176,3 @@ class NumworksFS(Operations, LoggingMixIn):
                 file = NumworkFile(p.name.removesuffix(".py"), "")
 
             file.content = file.content[:length].ljust(length, "\0")
-
-
-def main(
-    mountpoint,
-):
-    FUSE(
-        operations=NumworksFS(),
-        mountpoint=mountpoint,
-        encoding="utf-8",
-        nothreads=True,
-        foreground=True,
-        allow_other=True,
-    )
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG)
-
-    main(sys.argv[1])
