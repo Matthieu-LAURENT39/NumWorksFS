@@ -19,7 +19,7 @@ Then, when you're done:
 To see the other options, simply run `python ./run.py --help`
 
 ## Issues
-Due to how upsilon-py works, it's impossible to setup automatic reconnection. Therefore, **the FUSE is automatically closed during the first operations that's done after the calculator is unplugged.** 
+Due to how upsilon-py works, it's impossible to setup automatic reconnection. Therefore, **the FUSE is automatically closed during the first operation after the calculator is unplugged.** 
 
 If you're interested as to why it's impossible, it's that the call to numworks.connect() is blocking, and it cannot be threaded or upsilon-py starts breaking down.  
 It would *technically* be possible to just wait for numworks.connect(), but that would mean entirely blocking IO as soon as the calculator is disconnected, which will most likely lead to your file explorer freezing until the calculator is plugged back in.
