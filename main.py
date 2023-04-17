@@ -12,7 +12,6 @@ import logging
 from io import BytesIO
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.DEBUG)
 
 
 @dataclass
@@ -246,4 +245,6 @@ def main(
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.DEBUG)
+
     main(sys.argv[1])
