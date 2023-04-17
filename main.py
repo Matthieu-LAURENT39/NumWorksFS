@@ -30,6 +30,14 @@ class NumworksFS(Operations, LoggingMixIn):
         self.loop = asyncio.new_event_loop()
         self.loop.run_until_complete(self._setup_numworks())
 
+    def _assert_file_path_valid(self, path: Path, /) -> None:
+        # Can only create files at root
+        if not path.parent == Path(self.root):
+            raise FuseOSError(EIO)
+        # Can only create .py files
+        if not path.suffix == ".py":
+            raise FuseOSError(EIO)
+
     def readdir(self, path, fh):
         logger.info(f"Reading dir {path}")
         p = Path(path)
@@ -79,10 +87,7 @@ class NumworksFS(Operations, LoggingMixIn):
     def create(self, path, mode=0o777):
         logger.info(f"Creating file {path}. {mode=}")
         p = Path(path)
-
-        # Can only create files at root
-        if not p.parent == Path(self.root):
-            raise FuseOSError(EIO)
+        self._assert_file_path_valid(p)
 
         with NumworksStorage(self.numworks, self.loop) as s:
             s.files.append(NumworkFile(p.name.removesuffix(".py"), ""))
@@ -95,13 +100,7 @@ class NumworksFS(Operations, LoggingMixIn):
     def write(self, path, data, offset, fh):
         logger.info(f"Writting to file {path}.")
         p = Path(path)
-
-        # Can only create files at root
-        if not p.parent == Path(self.root):
-            raise FuseOSError(EIO)
-
-        if not p.suffix == ".py":
-            raise FuseOSError(EIO)
+        self._assert_file_path_valid(p)
 
         with NumworksStorage(self.numworks, self.loop) as s:
             file = s.get_file(p.name)
@@ -132,11 +131,7 @@ class NumworksFS(Operations, LoggingMixIn):
         logger.info(f"Renaming file: {old_path} -> {new_path}")
         old_p = Path(old_path)
         new_p = Path(new_path)
-
-        if not new_p.suffix == ".py":
-            raise FuseOSError(EIO)
-        if not new_p.parent == Path(self.root):
-            raise FuseOSError(EIO)
+        self._assert_file_path_valid(new_p)
 
         with NumworksStorage(self.numworks, self.loop) as s:
             file = s.get_file(old_p.name)
@@ -146,6 +141,9 @@ class NumworksFS(Operations, LoggingMixIn):
 
     def statfs(self, path):
         logger.info(f"Statfs for path {path}")
+
+        if path != self.root:
+            return None
 
         info = self.loop.run_until_complete(self.numworks.get_platform_info())
         with NumworksStorage(self.numworks, self.loop) as s:
@@ -169,14 +167,9 @@ class NumworksFS(Operations, LoggingMixIn):
             return True
 
     def truncate(self, path, length, fh=None):
+        logger.info(f"Truncating file {path}. {length=}")
         p = Path(path)
-
-        # Can only create files at root
-        if not p.parent == Path(self.root):
-            raise FuseOSError(EIO)
-
-        if not p.suffix == ".py":
-            raise FuseOSError(EIO)
+        self._assert_file_path_valid(p)
 
         with NumworksStorage(self.numworks, self.loop) as s:
             file = s.get_file(p.name)
