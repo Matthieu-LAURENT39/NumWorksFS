@@ -9,6 +9,7 @@ import upsilon_py
 from dataclasses import dataclass
 from stat import S_IFDIR, S_IFREG
 import logging
+from io import BytesIO
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -18,6 +19,10 @@ logging.basicConfig(level=logging.INFO)
 class NumworkFile:
     filename: str
     content: str
+
+    @property
+    def name(self) -> str:
+        return self.filename.removesuffix(".py")
 
 
 def records_to_files(records: list[dict]) -> list[NumworkFile]:
@@ -68,7 +73,7 @@ class NumworksFS(Operations, LoggingMixIn):
         self.loop.run_until_complete(self._setup_numworks())
 
     def readdir(self, path, fh):
-        logger.debug(f"Reading dir {path}")
+        logger.info(f"Reading dir {path}")
         p = Path(path)
         if p.absolute() != Path(self.root):
             raise FuseOSError(EIO)
@@ -77,15 +82,15 @@ class NumworksFS(Operations, LoggingMixIn):
         file_paths = [str(f.filename) for f in files]
         return [".", ".."] + file_paths
 
-    # TODO: take offset and size into account
-    # Should probably use BytesIO for that
     def read(self, path, size, offset, fh):
-        logger.debug(f"Reading file {path}. {size=}, {offset=}")
+        logger.info(f"Reading file {path}. {size=}, {offset=}")
         file = self._get_file(Path(path).name)
-        return file.content.encode()
+        f = BytesIO(file.content.encode("utf-8"))
+        f.seek(offset)
+        return f.read(size)
 
     def getattr(self, path, fh=None):
-        logger.debug(f"Getting attr for {path}")
+        logger.info(f"Getting attr for {path}")
 
         if path == self.root:
             size = 0
@@ -96,12 +101,12 @@ class NumworksFS(Operations, LoggingMixIn):
         mode_base = S_IFDIR if path == self.root else S_IFREG
 
         return dict(
-            st_mode=(mode_base | 0o555),
+            st_mode=(mode_base | 0o777),
             st_nlink=1,
             st_size=size,
-            st_ctime=0,
-            st_mtime=0,
-            st_atime=0,
+            # st_ctime=0,
+            # st_mtime=0,
+            # st_atime=0,
             st_uid=os.getuid(),
             st_gid=os.getgid(),
         )
@@ -116,6 +121,7 @@ def main(
     FUSE(
         operations=NumworksFS(),
         mountpoint=mountpoint,
+        encoding="utf-8",
         nothreads=True,
         foreground=True,
         allow_other=True,
