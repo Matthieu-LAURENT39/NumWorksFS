@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-import upsilon_py
 import logging
-from types import TracebackType
 from asyncio import AbstractEventLoop
 from copy import deepcopy
+from dataclasses import dataclass
+from types import TracebackType
+
+import upsilon_py
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,6 @@ class NumworkFile:
 def records_to_files(records: list[dict]) -> list[NumworkFile]:
     files = []
     for r in records:
-        # TODO: Support other types of files
         if r["type"] != "py":
             continue
         # * upsilon_py uses the wrong encoding when decoding, it
@@ -104,7 +104,7 @@ class NumworksStorage:
             records.remove(file)
         # Modified files
         for name in old_names & new_names:
-            logger.debug(f"Changed file: {name}")
+            logger.debug(f"Existing file: {name}")
             file = next(f for f in records if f.get("name") == name)
             file["code"] = self.get_file(f"{name}.py").content
         # New files

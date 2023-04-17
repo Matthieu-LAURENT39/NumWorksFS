@@ -1,16 +1,16 @@
+import asyncio
+import logging
 import os
 import sys
-import asyncio
-
-from fuse import FUSE, FuseOSError, Operations, LoggingMixIn
 from errno import EIO, ENOENT
-from pathlib import Path
-import upsilon_py
-from dataclasses import dataclass
-from stat import S_IFDIR, S_IFREG
-import logging
 from io import BytesIO
-from storage_handler import NumworksStorage, NumworkFile
+from pathlib import Path
+from stat import S_IFDIR, S_IFREG
+
+import upsilon_py
+from fuse import FUSE, FuseOSError, LoggingMixIn, Operations
+
+from storage_handler import NumworkFile, NumworksStorage
 
 logger = logging.getLogger(__name__)
 
