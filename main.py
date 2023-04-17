@@ -10,41 +10,9 @@ from dataclasses import dataclass
 from stat import S_IFDIR, S_IFREG
 import logging
 from io import BytesIO
+from storage_handler import NumworksStorage, NumworkFile
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class NumworkFile:
-    filename: str
-    content: str
-
-    @property
-    def name(self) -> str:
-        return self.filename.removesuffix(".py")
-
-    @property
-    def size(self) -> int:
-        return len(self.content.encode("utf-8"))
-
-
-def records_to_files(records: list[dict]) -> list[NumworkFile]:
-    files = []
-    for r in records:
-        # TODO: Support other types of files
-        if r["type"] != "py":
-            continue
-        # * upsilon_py uses the wrong encoding when decoding, it
-        # * uses iso-8859-1 while numworks uses utf-8, so we
-        # * have to work around that.
-        content = r["code"].encode("iso-8859-1").decode("utf-8")
-        files.append(
-            NumworkFile(
-                filename=f"{r['name']}.py",
-                content=content,
-            )
-        )
-    return files
 
 
 class NumworksFS(Operations, LoggingMixIn):
@@ -57,19 +25,6 @@ class NumworksFS(Operations, LoggingMixIn):
         await self.numworks.connect()
         logger.info("Numworks connection ready!")
 
-    def _get_files(self) -> list[NumworkFile]:
-        files = records_to_files(
-            self.loop.run_until_complete(self.numworks.backup_storage())["records"]
-        )
-        return files
-
-    def _get_file(self, filename: str) -> NumworkFile:
-        files = self._get_files()
-        try:
-            return next(f for f in files if f.filename == filename)
-        except StopIteration:
-            raise FuseOSError(ENOENT) from None
-
     def __init__(self):
         self.root = "/"
         self.loop = asyncio.new_event_loop()
@@ -81,13 +36,14 @@ class NumworksFS(Operations, LoggingMixIn):
         if p.absolute() != Path(self.root):
             raise FuseOSError(EIO)
 
-        files = self._get_files()
-        file_paths = [str(f.filename) for f in files]
-        return [".", ".."] + file_paths
+        with NumworksStorage(self.numworks, self.loop) as s:
+            file_names = [str(f.filename) for f in s.files]
+        return [".", ".."] + file_names
 
     def read(self, path, size, offset, fh):
         logger.info(f"Reading file {path}. {size=}, {offset=}")
-        file = self._get_file(Path(path).name)
+        with NumworksStorage(self.numworks, self.loop) as s:
+            file = s.get_file(Path(path).name)
         f = BytesIO(file.content.encode("utf-8"))
         f.seek(offset)
         return f.read(size)
@@ -98,8 +54,11 @@ class NumworksFS(Operations, LoggingMixIn):
         if path == self.root:
             size = 0
         else:
-            file = self._get_file(Path(path).name)
-            size = file.size
+            with NumworksStorage(self.numworks, self.loop) as s:
+                file = s.get_file(Path(path).name)
+                if file is None:
+                    raise FuseOSError(ENOENT)
+                size = file.size
 
         mode_base = S_IFDIR if path == self.root else S_IFREG
 
@@ -117,17 +76,6 @@ class NumworksFS(Operations, LoggingMixIn):
     # It's needed for some reason
     getxattr = None
 
-    def _create_storage_file(self, storage: dict, name: str) -> dict:
-        storage["records"].append(
-            {
-                "name": name,
-                "type": "py",
-                "autoImport": False,
-                "code": "",
-            }
-        )
-        return storage
-
     def create(self, path, mode=0o777):
         logger.info(f"Creating file {path}. {mode=}")
         p = Path(path)
@@ -136,9 +84,8 @@ class NumworksFS(Operations, LoggingMixIn):
         if not p.parent == Path(self.root):
             raise FuseOSError(EIO)
 
-        storage = self.loop.run_until_complete(self.numworks.backup_storage())
-        storage = self._create_storage_file(storage, p.name.removesuffix(".py"))
-        self.loop.run_until_complete(self.numworks.install_storage(storage))
+        with NumworksStorage(self.numworks, self.loop) as s:
+            s.files.append(NumworkFile(p.name.removesuffix(".py"), ""))
         return 0
 
     # def mkdir(self, path, mode):
@@ -152,32 +99,18 @@ class NumworksFS(Operations, LoggingMixIn):
         if not p.suffix == ".py":
             raise FuseOSError(EIO)
 
-        try:
-            f = self._get_file(p.name)
-            content = f.content.encode("utf-8")
-        except FuseOSError:
-            f = None
-            content = b""
+        with NumworksStorage(self.numworks, self.loop) as s:
+            file = s.get_file(p.name)
+            content = b"" if file is None else file.content.encode("utf-8")
 
-        # Write in the BytesIO
-        b = BytesIO(content)
-        b.seek(offset, 0)
-        b.write(data)
-        b.seek(0)
+            # Write in the BytesIO
+            b = BytesIO(content)
+            b.seek(offset, 0)
+            b.write(data)
+            b.seek(0)
 
-        # Reflect the write on numworks
-        storage = self.loop.run_until_complete(self.numworks.backup_storage())
-        try:
-            file = next(f for f in storage["records"] if f'{f["name"]}.py' == p.name)
-        except StopIteration:
-            storage = self._create_storage_file(storage, p.name.removesuffix(".py"))
-            file = next(f for f in storage["records"] if f'{f["name"]}.py' == p.name)
-
-        # * upsilon_py uses the wrong encoding, it
-        # * uses iso-8859-1 while numworks uses utf-8,
-        # * so we have to work around that.
-        file["code"] = b.getvalue().decode("utf-8")
-        self.loop.run_until_complete(self.numworks.install_storage(storage))
+            # Reflect changes on numworks
+            file.content = b.getvalue().decode("utf-8")
 
         return len(data)
 
@@ -185,13 +118,11 @@ class NumworksFS(Operations, LoggingMixIn):
         logger.info(f"Unlinking file {path}.")
 
         p = Path(path)
-        storage = self.loop.run_until_complete(self.numworks.backup_storage())
-        try:
-            file = next(f for f in storage["records"] if f'{f["name"]}.py' == p.name)
-            storage["records"].remove(file)
-        except StopIteration:
-            raise FuseOSError(EIO) from None
-        self.loop.run_until_complete(self.numworks.install_storage(storage))
+        with NumworksStorage(self.numworks, self.loop) as s:
+            file = s.get_file(p.name)
+            if file is None:
+                raise FuseOSError(ENOENT)
+            s.files.remove(file)
 
     def rename(self, old_path, new_path) -> None:
         logger.info(f"Renaming file: {old_path} -> {new_path}")
@@ -203,21 +134,18 @@ class NumworksFS(Operations, LoggingMixIn):
         if not new_p.parent == Path(self.root):
             raise FuseOSError(EIO)
 
-        storage = self.loop.run_until_complete(self.numworks.backup_storage())
-        try:
-            file = next(
-                f for f in storage["records"] if f'{f["name"]}.py' == old_p.name
-            )
-            file["name"] = new_p.name.removesuffix(".py")
-        except StopIteration:
-            raise FuseOSError(ENOENT) from None
-        self.loop.run_until_complete(self.numworks.install_storage(storage))
+        with NumworksStorage(self.numworks, self.loop) as s:
+            file = s.get_file(old_p.name)
+            if file is None:
+                raise FuseOSError(ENOENT)
+            file.name = new_p.name.removesuffix(".py")
 
     def statfs(self, path):
         logger.info(f"Statfs for path {path}")
 
         info = self.loop.run_until_complete(self.numworks.get_platform_info())
-        used = sum(f.size for f in self._get_files())
+        with NumworksStorage(self.numworks, self.loop) as s:
+            used = sum(f.size for f in s.files)
 
         return {
             # No idea what the block size is and couldn't find any info
