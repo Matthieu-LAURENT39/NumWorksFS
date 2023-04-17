@@ -96,6 +96,10 @@ class NumworksFS(Operations, LoggingMixIn):
         logger.info(f"Writting to file {path}.")
         p = Path(path)
 
+        # Can only create files at root
+        if not p.parent == Path(self.root):
+            raise FuseOSError(EIO)
+
         if not p.suffix == ".py":
             raise FuseOSError(EIO)
 
@@ -157,6 +161,29 @@ class NumworksFS(Operations, LoggingMixIn):
             # Source: numworks website
             "f_namemax": 219,
         }
+
+    def ioctl(self, path, cmd, arg, fh, flags, data):
+        logger.info(f"IOctl: {path=}, {cmd=}, {arg=}, {fh=}, {flags=}, {data=}")
+        # * Required for nano and micro to work
+        if cmd == 0x5401:
+            return True
+
+    def truncate(self, path, length, fh=None):
+        p = Path(path)
+
+        # Can only create files at root
+        if not p.parent == Path(self.root):
+            raise FuseOSError(EIO)
+
+        if not p.suffix == ".py":
+            raise FuseOSError(EIO)
+
+        with NumworksStorage(self.numworks, self.loop) as s:
+            file = s.get_file(p.name)
+            if file is None:
+                file = NumworkFile(p.name.removesuffix(".py"), "")
+
+            file.content = file.content[:length].ljust(length, "\0")
 
 
 def main(
